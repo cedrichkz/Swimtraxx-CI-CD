@@ -1,0 +1,4 @@
+pyserial
+tqdm
+numpy
+pandas

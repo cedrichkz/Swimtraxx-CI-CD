@@ -1,0 +1,64 @@
+#
+# A pipeline is composed of independent jobs that run scripts, grouped into stages.
+# Stages run in sequential order, but jobs within stages run in parallel.
+#
+# For more information, see: https://docs.gitlab.com/ee/ci/yaml/index.html#stages
+
+stages: # List of stages for jobs, and their order of execution
+  - pre-build-images
+  - build 
+  - test
+
+
+
+# This job build the docker image that other stages will use, only triggers ones a day on a schedules
+# The build container is stored in the container registry
+build-image:
+  image: docker:18.09.7
+  stage: pre-build-images
+  only:
+    - schedules 
+  services:
+    - docker:18.09.7-dind
+  script:
+    - echo $CI_REGISTRY_PASSWORD | docker login -u $CI_REGISTRY_USER $CI_REGISTRY --password-stdin
+    - docker build -f dockerfiles/build-image.dockerfile -t $CI_REGISTRY_IMAGE/build-image:latest .
+    - echo $CI_REGISTRY_PASSWORD | docker login -u $CI_REGISTRY_USER $CI_REGISTRY --password-stdin
+    - docker push $CI_REGISTRY_IMAGE/build-image:latest
+  allow_failure: true
+
+# This job build the project using the "embedded studio" installation contained in the used docker image
+build-job:
+  image: $CI_REGISTRY_IMAGE/build-image:latest
+  stage: build
+  variables:
+    CONFIG: "ABLE15_1"
+  script:
+    - /tools/SEGGER/bin/emBuild -config "$CONFIG" swimtraxx_ble/ble_app/ble_app_swimtraxx/pca10056/s140/ses/ble_app_template_pca10056_s140.emProject
+  artifacts:
+    paths:
+      - "swimtraxx_ble/ble_app/ble_app_swimtraxx/pca10056/s140/ses/Output/$CONFIG/**"
+
+# This job checks the code formatting
+code-format:
+  stage: test
+  image: python
+  before_script:
+    # Install clang formatter
+    - wget https://github.com/ElectricRCAircraftGuy/eRCaGuy_CodeFormatter/raw/main/bin/clang-format
+    - wget https://github.com/ElectricRCAircraftGuy/eRCaGuy_CodeFormatter/raw/main/bin/git-clang-format
+    - chmod +x clang-format git-clang-format
+    - mv clang-format /usr/bin
+    - mv git-clang-format /usr/bin
+    - git clone https://github.com/Sarcasm/run-clang-format.git # get the run-clang-format python helper script
+  script:
+    - clang-format --version
+    - run-clang-format/run-clang-format.py -r
+      --color always
+      --style=file
+      swimtraxx_ble/ble_app/ble_app_swimtraxx/main.c
+      swimtraxx_ble/ble_app/ble_app_swimtraxx/pca10056/s140/ses
+      hardware_drivers
+      capetech_libs
+  needs: [] # This job is not dependent on other jobs
+  allow_failure: False
